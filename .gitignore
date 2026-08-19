@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.pyc
+cookies.txt
+dead_cookies.txt
+config.json
+log/
+*.log
+build/
+dist/
+*.spec
+deploy-package/*.exe
