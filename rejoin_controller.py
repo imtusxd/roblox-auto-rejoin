@@ -32,6 +32,7 @@ import disconnect_watcher as dw
 import launcher
 import process_manager
 import roblox_auth
+import share_link
 import window_manager
 from accounts import Account
 from webhook import WebhookNotifier
@@ -283,20 +284,32 @@ class RejoinController:
         private_server_code = account.private_server
         if private_server_code and accounts.is_unsupported_share_link(private_server_code):
             # Roblox's newer share-link format - see
-            # accounts.is_unsupported_share_link for why this can't be
-            # redeemed the way an old-style privateServerLinkCode can.
-            # Falling back to the public server (rather than sending
-            # Roblox a request that's guaranteed to silently never open a
-            # real game window - confirmed live on this machine) at least
-            # keeps the account online instead of stuck failing forever.
-            self._log(
-                account,
-                "private server is a roblox.com/share link (newer format, not "
-                "resolvable for a specific account yet) - joining the public "
-                "server instead this launch",
-            )
-            private_server_code = None
-            target_desc += " (private server override skipped - unsupported share-link format)"
+            # accounts.is_unsupported_share_link. Resolved into the real,
+            # redeemable access code via share_link.resolve_share_link
+            # (confirmed live 2026-08-20 - see that module's own
+            # docstring) using the SAME csrf token already fetched above
+            # for the auth ticket, no extra round trip. Only falls back to
+            # the public server (the original safety net) if resolution
+            # itself fails - an expired/invalid invite, or this account
+            # genuinely has no access to it - rather than for every single
+            # launch the way it unconditionally used to.
+            try:
+                resolved = share_link.resolve_share_link(
+                    session, account.cookie, private_server_code, auth.csrf_token
+                )
+            except share_link.ShareLinkError as exc:
+                self._log(account, f"could not resolve private server share link, joining public server instead: {exc}")
+                private_server_code = None
+                target_desc += " (private server override skipped - share link did not resolve)"
+            else:
+                if resolved.place_id != place_id:
+                    self._log(
+                        account,
+                        f"note: private server's real place ({resolved.place_id}) differs from "
+                        f"configured place_id ({place_id}) - launching with place_id as configured",
+                    )
+                private_server_code = resolved.access_code
+                target_desc += f" (private server {private_server_code}, resolved from share link)"
         elif private_server_code:
             target_desc += f" (private server {private_server_code})"
 
