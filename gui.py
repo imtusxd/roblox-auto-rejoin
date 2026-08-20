@@ -779,12 +779,23 @@ class App:
 
         # Scrollable body - the field list is long enough now (window
         # layout + resource + webhook + cookie-check sections) that it
-        # doesn't comfortably fit a fixed-height dialog.
+        # doesn't comfortably fit a fixed-height dialog. Label-above-field
+        # (single column, entries/comboboxes stretch to fill the available
+        # width via sticky="ew" + columnconfigure weight) rather than the
+        # earlier label-beside-field two-column grid - confirmed live that
+        # the two-column version silently clipped the whole entry column
+        # off-screen on a machine with different DPI/display scaling than
+        # the dev machine (only labels were visible, no way to reach the
+        # fields at all - the canvas only scrolls vertically). Stacking
+        # means every row only ever needs ONE column's worth of width, so
+        # there's nothing left for a narrower canvas to clip.
         canvas = tk.Canvas(dialog, highlightthickness=0, bg=BG)
         scrollbar = ttk.Scrollbar(dialog, orient=tk.VERTICAL, command=canvas.yview)
         body = ttk.Frame(canvas, padding=(4, 4))
+        body.columnconfigure(0, weight=1)
         body.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.create_window((0, 0), window=body, anchor=tk.NW)
+        canvas_window = canvas.create_window((0, 0), window=body, anchor=tk.NW)
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(canvas_window, width=e.width))
         canvas.configure(yscrollcommand=scrollbar.set)
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         scrollbar.pack(side=tk.LEFT, fill=tk.Y)
@@ -803,19 +814,23 @@ class App:
             row = next_row()
             sep = ttk.Frame(body, height=1, style="TFrame")
             if row > 1:
-                sep.grid(row=row, column=0, columnspan=3, sticky="ew", padx=8, pady=(10, 0))
+                sep.grid(row=row, column=0, sticky="ew", padx=8, pady=(10, 0))
                 row = next_row()
             ttk.Label(body, text=title.upper(), foreground=ACCENT, font=FONT_BOLD).grid(
-                row=row, column=0, columnspan=3, sticky=tk.W, padx=8, pady=(8, 4)
+                row=row, column=0, sticky=tk.W, padx=8, pady=(8, 4)
             )
 
         def add_row(label: str, key: str, browse: bool = False) -> None:
-            row = next_row()
-            ttk.Label(body, text=label).grid(row=row, column=0, sticky=tk.W, padx=8, pady=4)
+            label_row = next_row()
+            ttk.Label(body, text=label).grid(row=label_row, column=0, sticky=tk.W, padx=8, pady=(4, 0))
+
+            field_row = next_row()
+            field_frame = ttk.Frame(body)
+            field_frame.grid(row=field_row, column=0, sticky="ew", padx=8, pady=(0, 4))
+            field_frame.columnconfigure(0, weight=1)
+
             var = tk.StringVar(value=str(getattr(self.config, key)))
-            ttk.Entry(body, textvariable=var, width=40).grid(
-                row=row, column=1, sticky=tk.W, padx=4, pady=4
-            )
+            ttk.Entry(field_frame, textvariable=var).grid(row=0, column=0, sticky="ew")
             fields[key] = var
             if browse:
                 def do_browse() -> None:
@@ -823,24 +838,26 @@ class App:
                     if path:
                         var.set(path)
 
-                ttk.Button(body, text="Browse...", command=do_browse).grid(
-                    row=row, column=2, padx=4
+                ttk.Button(field_frame, text="Browse...", command=do_browse).grid(
+                    row=0, column=1, padx=(4, 0)
                 )
 
         def add_bool_row(label: str, key: str) -> None:
             row = next_row()
             var = tk.BooleanVar(value=bool(getattr(self.config, key)))
             ttk.Checkbutton(body, text=label, variable=var).grid(
-                row=row, column=0, columnspan=2, sticky=tk.W, padx=8, pady=4
+                row=row, column=0, sticky=tk.W, padx=8, pady=4
             )
             fields[key] = var
 
         def add_choice_row(label: str, key: str, choices: list[str]) -> None:
-            row = next_row()
-            ttk.Label(body, text=label).grid(row=row, column=0, sticky=tk.W, padx=8, pady=4)
+            label_row = next_row()
+            ttk.Label(body, text=label).grid(row=label_row, column=0, sticky=tk.W, padx=8, pady=(4, 0))
+
+            field_row = next_row()
             var = tk.StringVar(value=str(getattr(self.config, key)))
-            ttk.Combobox(body, textvariable=var, values=choices, state="readonly", width=20).grid(
-                row=row, column=1, sticky=tk.W, padx=4, pady=4
+            ttk.Combobox(body, textvariable=var, values=choices, state="readonly").grid(
+                row=field_row, column=0, sticky="ew", padx=8, pady=(0, 4)
             )
             fields[key] = var
 
@@ -880,11 +897,19 @@ class App:
         add_row("Host (0.0.0.0 = reachable on the LAN, 127.0.0.1 = this machine only)", "api_host")
         add_row("Port", "api_port")
 
-        api_key_row = next_row()
-        ttk.Label(body, text="API key").grid(row=api_key_row, column=0, sticky=tk.W, padx=8, pady=4)
+        api_key_label_row = next_row()
+        ttk.Label(body, text="API key").grid(
+            row=api_key_label_row, column=0, sticky=tk.W, padx=8, pady=(4, 0)
+        )
+
+        api_key_field_row = next_row()
+        api_key_frame = ttk.Frame(body)
+        api_key_frame.grid(row=api_key_field_row, column=0, sticky="ew", padx=8, pady=(0, 4))
+        api_key_frame.columnconfigure(0, weight=1)
+
         api_key_var = tk.StringVar(value=self.config.api_key)
-        api_key_entry = ttk.Entry(body, textvariable=api_key_var, width=42, state="readonly")
-        api_key_entry.grid(row=api_key_row, column=1, sticky=tk.W, padx=4, pady=4)
+        api_key_entry = ttk.Entry(api_key_frame, textvariable=api_key_var, state="readonly")
+        api_key_entry.grid(row=0, column=0, sticky="ew")
 
         def do_regenerate_key() -> None:
             if not messagebox.askyesno(
@@ -899,8 +924,8 @@ class App:
             save_config(self.config)
             api_key_var.set(self.config.api_key)
 
-        ttk.Button(body, text="Regenerate...", command=do_regenerate_key).grid(
-            row=api_key_row, column=2, padx=4
+        ttk.Button(api_key_frame, text="Regenerate...", command=do_regenerate_key).grid(
+            row=0, column=1, padx=(4, 0)
         )
 
         int_fields = {
